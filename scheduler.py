@@ -127,7 +127,7 @@ def _now_lisbon() -> datetime.datetime:
 
 # ── Weekly report builder ──────────────────────────────────────────────────
 
-def _build_weekly_report(records: list) -> str:
+def _build_weekly_report(records: list, insight: str = "") -> str:
     if not records:
         return "За эту неделю нет данных."
 
@@ -142,10 +142,15 @@ def _build_weekly_report(records: list) -> str:
                     pass
         return sum(vals) / len(vals) if vals else None
 
-    lines = [
+    lines = []
+    if insight:
+        lines.append(insight)
+        lines.append("")
+
+    lines.extend([
         f"📋 *Итоги недели* — {len(records)} дн. с данными\n",
         "─── Вечерние метрики ───",
-    ]
+    ])
     for field, label in NUMERIC_EVENING:
         a = avg(field)
         if a is not None:
@@ -225,17 +230,19 @@ async def _do_send_evening(bot, late: bool = False):
 
 
 async def _do_send_weekly(bot, late: bool = False):
-    import sheets, cycle
+    import sheets, cycle, weekly_insights
     records     = sheets.get_week_data()
     all_records = sheets.get_all_records()
-    text        = _build_weekly_report(records)
+    cycle_block = ""
     try:
         info  = cycle.get_cycle_info(all_records)
-        block = cycle.format_cycle_block(info)
-        if block:
-            text += f"\n\n{block}"
+        cycle_block = cycle.format_cycle_block(info)
     except Exception:
         pass
+    insight = weekly_insights.build_weekly_insight(records, cycle_block)
+    text = _build_weekly_report(records, insight)
+    if cycle_block:
+        text += f"\n\n{cycle_block}"
     if late:
         text = "⏰ _Опоздавший отчёт_ — бот перезапускался\n\n" + text
 

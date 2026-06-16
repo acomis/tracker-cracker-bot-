@@ -6,6 +6,8 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 TIMEZONE = pytz.timezone(os.environ.get("TIMEZONE", "Europe/Lisbon"))
 
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 MORNING_HOUR = 9
 MORNING_MINUTE = 0

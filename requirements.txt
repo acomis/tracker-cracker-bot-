@@ -2,3 +2,4 @@ python-telegram-bot[job-queue]>=21.0,<22.0
 gspread>=6.0.0,<7.0.0
 google-auth>=2.0.0,<3.0.0
 pytz>=2024.1
+openai>=1.40.0,<2.0.0

@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 import sheets
 import cycle
+import weekly_insights
 from config import MORNING_QUESTIONS, EVENING_QUESTIONS
 from handlers.checkin import start_flow, cancel_flow, handle_skip as checkin_skip, STATE
 
@@ -123,6 +124,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     records = sheets.get_week_data()
+    all_records = sheets.get_all_records()
 
     if not records:
         await update.message.reply_text("Нет данных за последние 7 дней.")
@@ -139,7 +141,20 @@ async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
         return sum(vals) / len(vals) if vals else None
 
-    lines = [f"📅 Последние 7 дней ({len(records)} дн. с данными)\n"]
+    try:
+        cycle_info = cycle.get_cycle_info(all_records)
+        cycle_block = cycle.format_cycle_block(cycle_info)
+    except Exception:
+        cycle_block = ""
+
+    insight = weekly_insights.build_weekly_insight(records, cycle_block)
+
+    lines = []
+    if insight:
+        lines.append(insight)
+        lines.append("")
+
+    lines.append(f"📅 Последние 7 дней ({len(records)} дн. с данными)\n")
 
     lines.append("── Вечерние метрики ──")
     for field, label in NUMERIC_EVENING:
@@ -176,4 +191,7 @@ async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
         top = Counter(all_tags).most_common(5)
         lines.append("\n🏷 Частые теги: " + ", ".join(f"{t}({c})" for t, c in top))
 
-    await update.message.reply_text("\n".join(lines))
+    if cycle_block:
+        lines.append(f"\n{cycle_block}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
