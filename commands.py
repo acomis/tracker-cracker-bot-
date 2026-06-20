@@ -18,12 +18,12 @@ NUMERIC_EVENING = [
     ("evening_energy",         "⚡ Энергия"),
     ("irritability",           "😤 Раздражительность"),
     ("social_battery",         "🔋 Соц. заряд"),
-    ("libido",                 "💫 Либидо"),
+    ("libido",                 "💫 Сексуальное желание"),
     ("confidence_beauty",      "✨ Уверенность"),
     ("physical_state_evening", "💪 Физ. состояние"),
     ("productivity_focus",     "🎯 Продуктивность"),
     ("leo_day",                "🦁 День с Лео"),
-    ("intimacy_desire",        "❤️ Близость"),
+    ("intimacy_desire",        "❤️ Нежность / контакт"),
 ]
 
 NUMERIC_MORNING = [

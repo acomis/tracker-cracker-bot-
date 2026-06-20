@@ -1,6 +1,7 @@
 import json
 import logging
 from statistics import mean
+from collections import Counter
 
 from openai import OpenAI
 
@@ -19,12 +20,12 @@ NUMERIC_FIELDS = {
     "evening_energy": "энергия вечером",
     "irritability": "раздражительность",
     "social_battery": "социальный заряд",
-    "libido": "либидо",
+    "libido": "сексуальное желание",
     "confidence_beauty": "уверенность / красота",
     "physical_state_evening": "физическое состояние вечером",
     "productivity_focus": "продуктивность / фокус",
     "leo_day": "день с Лео",
-    "intimacy_desire": "желание близости",
+    "intimacy_desire": "желание нежности / контакта",
 }
 
 TEXT_FIELDS = ("morning_notes", "best_moment", "worst_moment", "evening_notes")
@@ -65,6 +66,12 @@ def _collect_tags(records: list[dict]) -> list[str]:
     return tags
 
 
+def _top_metric_changes(summary: dict) -> list[dict]:
+    metrics = list(summary.values())
+    metrics.sort(key=lambda item: item["spread"], reverse=True)
+    return metrics[:5]
+
+
 def _compact_records(records: list[dict]) -> list[dict]:
     compact = []
     for row in records:
@@ -89,26 +96,30 @@ def _compact_records(records: list[dict]) -> list[dict]:
 def _local_fallback(records: list[dict], cycle_block: str = "") -> str:
     numeric = _summarize_numeric(records)
     baseline = numeric.get("baseline_day")
-    energy = numeric.get("evening_energy") or numeric.get("morning_energy")
+    morning_energy = numeric.get("morning_energy")
+    evening_energy = numeric.get("evening_energy")
     anxiety = numeric.get("anxiety_level")
     focus = numeric.get("productivity_focus")
+    tags = Counter(_collect_tags(records)).most_common(3)
 
     lines = ["✨ Смысл недели"]
-    lines.append(f"Ты отметила {len(records)} дн. — это уже не «просто цифры», а след внимания к себе.")
+    lines.append(f"Ты отметила {len(records)} дн., и это уже дает не ощущение в тумане, а карту недели.")
     if baseline:
         if baseline["spread"] >= 4:
-            lines.append("Неделя выглядела неровной: были заметные перепады по общему состоянию.")
+            lines.append(f"Неделя была с перепадами: общий день гулял от {baseline['min']:.0f} до {baseline['max']:.0f}.")
         else:
-            lines.append("Неделя выглядела довольно ровной: состояние менялось, но без резких провалов по общей оценке.")
-    if energy:
-        lines.append(f"По энергии среднее около {energy['avg']}/10, так что следующий шаг — беречь окна, где сил больше.")
+            lines.append(f"Общее состояние было довольно ровным: среднее {baseline['avg']}/10 без сильных провалов.")
+    if morning_energy and evening_energy:
+        lines.append(f"Утро выглядело тяжелее вечера: энергия утром {morning_energy['avg']}/10, вечером {evening_energy['avg']}/10.")
     if anxiety:
-        lines.append(f"Тревога в среднем около {anxiety['avg']}/10; стоит заранее оставлять себе больше воздуха в плотные дни.")
+        lines.append(f"Тревога в среднем {anxiety['avg']}/10, но частые теги могут показать, где она цепляется за контекст.")
     if focus:
-        lines.append(f"Фокус держался примерно на {focus['avg']}/10 — это хороший сигнал для маленьких, завершенных задач.")
+        lines.append(f"Фокус около {focus['avg']}/10: на следующей неделе лучше планировать короткие завершения, а не героические рывки.")
+    if tags:
+        lines.append("Самые частые факторы: " + ", ".join(f"{tag} ({count})" for tag, count in tags) + ".")
     if cycle_block:
-        lines.append("На следующей неделе смотри на цикл как на контекст, а не как на приговор: он может объяснять оттенок энергии.")
-    lines.append("Ожидание на следующую неделю: не требовать от себя идеальной стабильности, а замечать, какие условия помогают тебе возвращаться к себе.")
+        lines.append("Цикл лучше использовать как контекст недели: сверять с ним энергию и раздражительность, но не превращать в приговор.")
+    lines.append("Твой труд здесь в том, что ты не просто прожила неделю, а оставила следы, по которым уже можно себя понимать точнее.")
     return "\n".join(lines)
 
 
@@ -119,23 +130,28 @@ def build_weekly_insight(records: list[dict], cycle_block: str = "") -> str:
     if not OPENAI_API_KEY:
         return _local_fallback(records, cycle_block)
 
+    numeric_summary = _summarize_numeric(records)
     payload = {
         "days_count": len(records),
-        "numeric_summary": _summarize_numeric(records),
-        "tags": _collect_tags(records),
+        "numeric_summary": numeric_summary,
+        "largest_spreads": _top_metric_changes(numeric_summary),
+        "top_tags": Counter(_collect_tags(records)).most_common(8),
         "records": _compact_records(records),
         "cycle_context": cycle_block,
     }
 
     prompt = (
-        "Ты мягкий русскоязычный аналитик для личного Telegram wellness-трекера. "
-        "По данным за 7 дней напиши 5-10 предложений: что было на прошлой неделе, "
-        "были ли перепады или всё было ровно, какие усилия пользователя видны, "
-        "и чего примерно ожидать/как беречь себя на следующей неделе. "
-        "Тон: теплый, умный, бережный, без сюсюканья. "
-        "Важно: подчеркни значимость регулярных отметок и труда пользователя. "
-        "Не ставь диагнозы, не давай медицинских обещаний, не используй слово 'гормоны' как факт без осторожности. "
-        "Пиши от второго лица, без списков, без markdown-заголовков, максимум 10 предложений. "
+        "Ты аналитик личного Telegram wellness-трекера. "
+        "Напиши на русском 5-8 живых предложений, не список. "
+        "Твоя задача: сделать выводы из цифр, а не говорить общие поддерживающие фразы. "
+        "Обязательно используй 2-4 конкретных наблюдения из данных: средние значения, контрасты, перепады, частые теги, лучшие/сложные дни, заметки. "
+        "Скажи, была ли неделя ровной или с перепадами, и почему. "
+        "Скажи, где пользовательница уже проделала работу: регулярность, выдерживание сложных дней, замечание паттернов, сохранение контакта с собой. "
+        "Дай 2 практичных ожидания или фокуса на следующую неделю, связанных с данными и циклом, если он есть. "
+        "Тон: умный, теплый, точный, немного разговорный; без канцелярита и без открыток. "
+        "Запрещено: 'значительные усилия', 'твой опыт ценен', 'помни', 'моральный дух', 'всё, что ты делаешь, имеет значение'. "
+        "Не ставь диагнозы, не обещай медицинских эффектов, не выдумывай факты вне данных. "
+        "Пиши от второго лица, максимум 8 предложений, без markdown-заголовков. "
         "Данные:\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
