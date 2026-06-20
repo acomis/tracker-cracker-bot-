@@ -147,9 +147,9 @@ def format_cycle_block(info: dict) -> str:
 
     if info.get("signal") == "pms_only":
         return (
-            "🩸 *Цикл*\n"
+            "🌸 Цикл\n"
             "Вижу отметки про ПМС, но пока не вижу явной отметки начала цикла. "
-            "Когда начнется менструация, отметь `#цикл` или напиши об этом в заметке — "
+            "Когда начнется менструация, отметь #цикл или напиши об этом в заметке — "
             "и я начну считать фазу точнее."
         )
 
@@ -166,17 +166,15 @@ def format_cycle_block(info: dict) -> str:
 
     if cycle_day > DEFAULT_CYCLE_LENGTH:
         day_line = (
-            f"От последней отметки начала цикла прошло *{cycle_day}* дн.; "
-            f"по {DEFAULT_CYCLE_LENGTH}-дневной модели это примерно день *{estimated_day}*."
+            f"От последней отметки начала цикла прошло {cycle_day} дн.; "
+            f"по {DEFAULT_CYCLE_LENGTH}-дневной модели это примерно день {estimated_day}."
         )
     else:
-        day_line = f"Примерный день цикла: *{cycle_day}* из {DEFAULT_CYCLE_LENGTH}."
+        day_line = f"Примерный день цикла: {cycle_day} из {DEFAULT_CYCLE_LENGTH}."
 
     return (
-        "🩸 *Цикл*\n"
-        f"Возможно, ты в *{phase_name}* ({phase_subtitle}).\n"
+        "🌸 Цикл\n"
+        f"Возможно, ты в {phase_name} ({phase_subtitle}).\n"
         f"{day_line} Считаю от {period_start}.\n"
-        f"Расчет на дату: {calculated_for}.\n"
-        f"Фокус: {phase_hint}.\n"
-        "_Это мягкая оценка по твоим отметкам, не медицинский вывод._"
+        f"Расчет на дату: {calculated_for}."
     )

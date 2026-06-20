@@ -190,6 +190,7 @@ async def handle_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _finish_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finalize the flow and save to sheets."""
     import cycle
+    import daily_insights
     ud = context.user_data
     flow = ud.get(FLOW)
     answers = ud.get(ANSWERS, {})
@@ -202,9 +203,8 @@ async def _finish_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ok = sheets.save_data(answers)
 
-    # Build completion message
     if ok:
-        text = f"✅ {label} check-in завершён! Данные сохранены. Молодец 💪"
+        text = f"✅ {label} check-in завершён."
     else:
         text = (
             f"⚠️ {label} check-in завершён, но сохранить данные не удалось. "
@@ -212,13 +212,21 @@ async def _finish_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     # Append cycle info for evening check-in
-    if flow == "evening":
+    if ok and flow == "evening":
         try:
-            info = cycle.get_cycle_info(sheets.get_all_records())
-            block = cycle.format_cycle_block(info)
-            if block:
-                text += f"\n\n{block}"
+            all_records = sheets.get_all_records()
+            week_records = sheets.get_week_data()
+            info = cycle.get_cycle_info(all_records)
+            cycle_block = cycle.format_cycle_block(info)
+            today_data = sheets.get_today_data()
+            if answers.get("date"):
+                today_data = {**today_data, **answers}
+            insight = daily_insights.build_evening_insight(today_data, week_records, cycle_block)
+            if insight:
+                text += f"\n\n{insight}"
+            if cycle_block:
+                text += f"\n\n{cycle_block}"
         except Exception:
             pass
 
-    await msg.reply_text(text, parse_mode="Markdown")
+    await msg.reply_text(text)
