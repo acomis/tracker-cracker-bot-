@@ -130,6 +130,7 @@ def get_cycle_info(records: list[dict]) -> dict:
     return {
         "signal": "period_start",
         "period_start": period_start.isoformat(),
+        "calculated_for": today.isoformat(),
         "cycle_day": cycle_day,
         "estimated_day": phase["normalized_day"],
         "cycle_length": DEFAULT_CYCLE_LENGTH,
@@ -158,8 +159,9 @@ def format_cycle_block(info: dict) -> str:
     cycle_day = info.get("cycle_day")
     estimated_day = info.get("estimated_day")
     period_start = info.get("period_start")
+    calculated_for = info.get("calculated_for")
 
-    if not all((phase_name, phase_subtitle, phase_hint, cycle_day, estimated_day, period_start)):
+    if not all((phase_name, phase_subtitle, phase_hint, cycle_day, estimated_day, period_start, calculated_for)):
         return ""
 
     if cycle_day > DEFAULT_CYCLE_LENGTH:
@@ -174,6 +176,7 @@ def format_cycle_block(info: dict) -> str:
         "🩸 *Цикл*\n"
         f"Возможно, ты в *{phase_name}* ({phase_subtitle}).\n"
         f"{day_line} Считаю от {period_start}.\n"
+        f"Расчет на дату: {calculated_for}.\n"
         f"Фокус: {phase_hint}.\n"
         "_Это мягкая оценка по твоим отметкам, не медицинский вывод._"
     )
