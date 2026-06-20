@@ -20,7 +20,6 @@ NUMERIC_FIELDS = {
     "evening_energy": "энергия вечером",
     "irritability": "раздражительность",
     "social_battery": "социальный заряд",
-    "libido": "сексуальное желание",
     "confidence_beauty": "уверенность / красота",
     "physical_state_evening": "физическое состояние вечером",
     "productivity_focus": "продуктивность / фокус",
