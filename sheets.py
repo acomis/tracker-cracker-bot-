@@ -3,6 +3,7 @@ import json
 from datetime import date, timedelta
 
 import gspread
+from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 
 from config import GOOGLE_SERVICE_ACCOUNT_JSON, SHEET_COLUMNS, SPREADSHEET_ID
@@ -27,6 +28,18 @@ def _client():
 
 def _sheet():
     return _client().open_by_key(SPREADSHEET_ID).sheet1
+
+
+def _spreadsheet():
+    return _client().open_by_key(SPREADSHEET_ID)
+
+
+def _worksheet(title: str, rows: int = 100, cols: int = 10):
+    spreadsheet = _spreadsheet()
+    try:
+        return spreadsheet.worksheet(title)
+    except WorksheetNotFound:
+        return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
 
 
 def _ensure_header(ws):
@@ -99,4 +112,37 @@ def save_data(data: dict) -> bool:
         return True
     except Exception as e:
         logger.error("Failed to save data to Google Sheets: %s", e)
+        return False
+
+
+def get_registered_chat_ids() -> set[int]:
+    try:
+        ws = _worksheet("bot_chat_ids", rows=20, cols=2)
+        values = ws.col_values(1)
+        chat_ids = set()
+        for value in values:
+            if value == "chat_id":
+                continue
+            try:
+                chat_ids.add(int(value))
+            except (TypeError, ValueError):
+                pass
+        return chat_ids
+    except Exception as e:
+        logger.error("Failed to load chat_ids from Google Sheets: %s", e)
+        return set()
+
+
+def save_chat_id(chat_id: int) -> bool:
+    try:
+        ws = _worksheet("bot_chat_ids", rows=20, cols=2)
+        values = ws.col_values(1)
+        if not values:
+            ws.update("A1:B1", [["chat_id", "source"]])
+            values = ["chat_id"]
+        if str(chat_id) not in values:
+            ws.append_row([str(chat_id), "telegram"], value_input_option="USER_ENTERED")
+        return True
+    except Exception as e:
+        logger.error("Failed to save chat_id to Google Sheets: %s", e)
         return False

@@ -87,10 +87,19 @@ def _load_chat_ids():
     global _chat_ids
     if _CHAT_IDS_FILE.exists():
         try:
-            _chat_ids = set(json.loads(_CHAT_IDS_FILE.read_text()))
-            logger.info(f"Loaded chat_ids: {_chat_ids}")
+            _chat_ids.update(set(json.loads(_CHAT_IDS_FILE.read_text())))
+            logger.info(f"Loaded local chat_ids: {_chat_ids}")
         except Exception as e:
             logger.error(f"Failed to load chat_ids: {e}")
+    try:
+        import sheets
+        sheet_chat_ids = sheets.get_registered_chat_ids()
+        if sheet_chat_ids:
+            _chat_ids.update(sheet_chat_ids)
+            _save_chat_ids()
+            logger.info(f"Loaded Google Sheets chat_ids: {_chat_ids}")
+    except Exception as e:
+        logger.error(f"Failed to load chat_ids from sheets: {e}")
 
 
 def _save_chat_ids():
@@ -105,6 +114,11 @@ def register_chat(chat_id: int):
         _chat_ids.add(chat_id)
         _save_chat_ids()
         logger.info(f"Registered chat_id {chat_id}")
+    try:
+        import sheets
+        sheets.save_chat_id(chat_id)
+    except Exception as e:
+        logger.error(f"Failed to persist chat_id {chat_id} to sheets: {e}")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -193,6 +207,8 @@ def _build_weekly_report(records: list, insight: str = "") -> str:
 
 async def _do_send_morning(bot, late: bool = False):
     if not _chat_ids:
+        _load_chat_ids()
+    if not _chat_ids:
         logger.warning("No registered chat_ids — skipping morning reminder")
         return
     prefix = "⏰ _Опоздавшее напоминание_ — бот перезапускался\n\n" if late else ""
@@ -211,6 +227,8 @@ async def _do_send_morning(bot, late: bool = False):
 
 
 async def _do_send_evening(bot, late: bool = False):
+    if not _chat_ids:
+        _load_chat_ids()
     if not _chat_ids:
         logger.warning("No registered chat_ids — skipping evening reminder")
         return
@@ -231,6 +249,11 @@ async def _do_send_evening(bot, late: bool = False):
 
 async def _do_send_weekly(bot, late: bool = False):
     import sheets, cycle, weekly_insights
+    if not _chat_ids:
+        _load_chat_ids()
+    if not _chat_ids:
+        logger.warning("No registered chat_ids — skipping weekly report")
+        return
     records     = sheets.get_week_data()
     all_records = sheets.get_all_records()
     cycle_block = ""
