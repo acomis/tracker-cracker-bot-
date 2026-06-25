@@ -1,4 +1,4 @@
-"""Command handlers: /start, /morning, /evening, /status, /skip, /week, /cancel, /yesterday"""
+"""Command handlers: /start, /morning, /evening, /status, /week, /cancel, /yesterday"""
 
 from datetime import date, timedelta
 from telegram import Update
@@ -17,8 +17,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /morning — утренний check-in\n"
         "  /evening — вечерний check-in\n"
         "  /status  — прогресс за сегодня\n"
-        "  /week    — сводка за последние 7 дней\n"
-        "  /skip    — пропустить необязательный вопрос\n\n"
+        "  /week    — сводка за последние 7 дней\n\n"
         "Напоминания: 09:00 и 22:00 (Лиссабон) 🕐"
     )
 

@@ -51,7 +51,7 @@ async def start_flow(
     if msg:
         await msg.reply_text(
             f"{label} check-in{date_note} начался!\nОтвечай на вопросы по очереди. "
-            f"Используй /skip чтобы пропустить необязательный вопрос."
+            f"Сначала заметки, потом оценка по шкалам."
         )
     await _ask_current(update, context)
 
@@ -166,25 +166,15 @@ async def handle_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def handle_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Skip optional text question."""
+    """Skip is disabled: notes are part of the signal."""
     ud = context.user_data
     if ud.get(STATE) != "active":
         await update.message.reply_text("Нет активного check-in.")
         return
 
-    flow = ud.get(FLOW)
-    step = ud.get(STEP, 0)
-    questions = _questions(flow)
-    field, _ = questions[step]
-
-    if field in ("morning_notes", "evening_notes"):
-        ud[ANSWERS][field] = ""
-        await update.message.reply_text("⏭ Пропущено.")
-        ud[STEP] = step + 1
-        ud[WAITING_TEXT] = False
-        await _ask_current(update, context)
-    else:
-        await update.message.reply_text("Этот вопрос нельзя пропустить.")
+    await update.message.reply_text(
+        "В этой версии вопросы не пропускаем: заметки помогают боту понять контекст и лучше собрать рекомендации."
+    )
 
 
 async def _finish_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):

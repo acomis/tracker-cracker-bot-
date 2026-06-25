@@ -95,7 +95,7 @@ async def _text_handler(update: Update, context):
         ud = context.user_data
         if ud.get(STATE) == "active":
             await update.message.reply_text(
-                "Используй кнопки для ответа, или /skip чтобы пропустить."
+                "Используй кнопки для ответа."
             )
 
 
@@ -109,7 +109,6 @@ async def _post_init(app: Application):
         BotCommand("status",    "📊 Статус за сегодня"),
         BotCommand("week",      "📈 Итоги за 7 дней"),
         BotCommand("cancel",    "❌ Отменить текущий опрос"),
-        BotCommand("skip",      "⏭ Пропустить вопрос"),
         BotCommand("start",     "🤖 Перезапустить бота"),
     ])
     await catchup_missed(app.bot)
