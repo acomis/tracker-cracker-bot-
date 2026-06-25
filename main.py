@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_BOT_TOKEN
-from handlers.commands import cmd_start, cmd_morning, cmd_evening, cmd_skip, cmd_status, cmd_week, cmd_cancel, cmd_yesterday
+from handlers.commands import cmd_start, cmd_morning, cmd_evening, cmd_skip, cmd_status, cmd_week, cmd_month, cmd_cancel, cmd_yesterday
 from handlers.checkin import (
     start_flow,
     handle_scale_callback,
@@ -64,6 +64,11 @@ async def _week(update: Update, context):
     await cmd_week(update, context)
 
 
+async def _month(update: Update, context):
+    await _register_user(update, context)
+    await cmd_month(update, context)
+
+
 async def _cancel(update: Update, context):
     await _register_user(update, context)
     await cmd_cancel(update, context)
@@ -108,6 +113,7 @@ async def _post_init(app: Application):
         BotCommand("yesterday", "📅 Вечерний за вчера"),
         BotCommand("status",    "📊 Статус за сегодня"),
         BotCommand("week",      "📈 Итоги за 7 дней"),
+        BotCommand("month",     "🧭 Итоги месяца"),
         BotCommand("cancel",    "❌ Отменить текущий опрос"),
         BotCommand("start",     "🤖 Перезапустить бота"),
     ])
@@ -130,6 +136,7 @@ def main():
     app.add_handler(CommandHandler("skip",      _skip))
     app.add_handler(CommandHandler("status",    _status))
     app.add_handler(CommandHandler("week",      _week))
+    app.add_handler(CommandHandler("month",     _month))
 
     app.add_handler(CallbackQueryHandler(_callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _text_handler))

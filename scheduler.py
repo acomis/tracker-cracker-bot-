@@ -1,4 +1,4 @@
-"""Scheduled jobs: morning (09:00), evening (22:00), weekly report (Sun 21:00).
+"""Scheduled jobs: morning (09:00), evening (22:00), weekly report (Sun 21:00), monthly report.
 
 Catch-up logic: on startup the bot checks timestamps of last sent reminders.
 If a reminder was due today (in the Lisbon window) and hasn't been sent in
@@ -21,6 +21,9 @@ _chat_ids: set[int] = set()
 
 WEEKLY_HOUR   = 21
 WEEKLY_MINUTE = 0
+MONTHLY_HOUR   = 21
+MONTHLY_MINUTE = 30
+TELEGRAM_MESSAGE_LIMIT = 3800
 
 # ── Timestamp-based sent tracking ─────────────────────────────────────────
 
@@ -59,6 +62,30 @@ def _hours_since_sent(key: str) -> float:
         return (now - last).total_seconds() / 3600
     except Exception:
         return 999.0
+
+
+def _split_message(text: str) -> list[str]:
+    if len(text) <= TELEGRAM_MESSAGE_LIMIT:
+        return [text]
+
+    chunks = []
+    current = ""
+    for paragraph in text.split("\n\n"):
+        addition = paragraph if not current else f"\n\n{paragraph}"
+        if len(current) + len(addition) <= TELEGRAM_MESSAGE_LIMIT:
+            current += addition
+            continue
+        if current:
+            chunks.append(current)
+        current = paragraph
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def _send_long_message(bot, chat_id: int, text: str):
+    for chunk in _split_message(text):
+        await bot.send_message(chat_id=chat_id, text=chunk)
 
 
 # ── Chat ID persistence ────────────────────────────────────────────────────
@@ -112,6 +139,21 @@ def _start_button(flow: str) -> InlineKeyboardMarkup:
 
 def _now_lisbon() -> datetime.datetime:
     return datetime.datetime.now(tz=TIMEZONE)
+
+
+def _is_last_day_of_month(now: datetime.datetime) -> bool:
+    return (now + datetime.timedelta(days=1)).month != now.month
+
+
+def _month_key_for_report_window(now: datetime.datetime, monthly_start: datetime.time, window_end: datetime.time) -> str | None:
+    current_month_key = f"{now.year}-{now.month:02d}"
+    if _is_last_day_of_month(now) and now.time() >= monthly_start:
+        return current_month_key
+    if now.time() <= window_end:
+        previous_day = now - datetime.timedelta(days=1)
+        if _is_last_day_of_month(previous_day):
+            return f"{previous_day.year}-{previous_day.month:02d}"
+    return None
 
 
 # ── Senders ────────────────────────────────────────────────────────────────
@@ -183,11 +225,53 @@ async def _do_send_weekly(bot, late: bool = False):
     iso_week = f"{now.isocalendar()[0]}-W{now.isocalendar()[1]}"
     for chat_id in list(_chat_ids):
         try:
-            await bot.send_message(chat_id=chat_id, text=text)
+            await _send_long_message(bot, chat_id, text)
             logger.info(f"Sent weekly report to {chat_id} (late={late})")
         except Exception as e:
             logger.error(f"Error sending weekly report to {chat_id}: {e}")
     _mark_sent(f"weekly_{iso_week}")
+
+
+async def _do_send_monthly(bot, late: bool = False, month_key: str | None = None):
+    import sheets, cycle, monthly_insights
+    if not _chat_ids:
+        _load_chat_ids()
+    if not _chat_ids:
+        logger.warning("No registered chat_ids — skipping monthly report")
+        return
+
+    now = _now_lisbon()
+    month_key = month_key or f"{now.year}-{now.month:02d}"
+    if _hours_since_sent(f"monthly_{month_key}") < 23:
+        logger.info("Monthly report already sent for %s", month_key)
+        return
+
+    year, month = (int(part) for part in month_key.split("-", 1))
+    records     = sheets.get_month_data(year=year, month=month)
+    all_records = sheets.get_all_records()
+    cycle_block = ""
+    try:
+        info  = cycle.get_cycle_info(all_records)
+        cycle_block = cycle.format_cycle_block(info)
+    except Exception:
+        pass
+
+    text = monthly_insights.build_monthly_insight(records, cycle_block, all_records)
+    if not text:
+        logger.warning("No monthly report text generated")
+        return
+    if cycle_block:
+        text += f"\n\n{cycle_block}"
+    if late:
+        text = "⏰ Опоздавший месячный отчёт — бот перезапускался\n\n" + text
+
+    for chat_id in list(_chat_ids):
+        try:
+            await _send_long_message(bot, chat_id, text)
+            logger.info(f"Sent monthly report to {chat_id} (late={late})")
+        except Exception as e:
+            logger.error(f"Error sending monthly report to {chat_id}: {e}")
+    _mark_sent(f"monthly_{month_key}")
 
 
 # ── APScheduler callbacks ──────────────────────────────────────────────────
@@ -204,6 +288,11 @@ async def _send_weekly_report(context):
     await _do_send_weekly(context.bot, late=False)
 
 
+async def _send_monthly_report(context):
+    if _is_last_day_of_month(_now_lisbon()):
+        await _do_send_monthly(context.bot, late=False)
+
+
 # ── Catch-up on startup ────────────────────────────────────────────────────
 
 async def catchup_missed(bot):
@@ -214,6 +303,7 @@ async def catchup_missed(bot):
       Morning window : 09:00 – 20:00 Lisbon  →  send if not sent in last 23 h
       Evening window : 22:00 – 02:00 Lisbon  →  send if not sent in last 23 h
       Weekly window  : Sunday 21:00 – 02:00  →  send if not sent this week
+      Monthly window : last day 21:30 – 02:00 → send if not sent this month
     """
     now     = _now_lisbon()
     t       = now.time()
@@ -225,22 +315,27 @@ async def catchup_missed(bot):
     # evening end wraps midnight — handled by checking time < 02:00 separately
     evening_end_next = datetime.time(2, 0)
     weekly_start  = datetime.time(WEEKLY_HOUR, WEEKLY_MINUTE)
+    monthly_start = datetime.time(MONTHLY_HOUR, MONTHLY_MINUTE)
 
     in_morning_window = morning_start <= t <= morning_end
     in_evening_window = t >= evening_start or t <= evening_end_next
     in_weekly_window  = (weekday == 7) and (t >= weekly_start or t <= evening_end_next)
+    monthly_key = _month_key_for_report_window(now, monthly_start, evening_end_next)
+    in_monthly_window = monthly_key is not None
 
     hours_morning = _hours_since_sent("morning")
     hours_evening = _hours_since_sent("evening")
 
     now_iso  = _now_lisbon()
     iso_week = f"{now_iso.isocalendar()[0]}-W{now_iso.isocalendar()[1]}"
+    month_key = monthly_key or f"{now_iso.year}-{now_iso.month:02d}"
     hours_weekly  = _hours_since_sent(f"weekly_{iso_week}")
+    hours_monthly = _hours_since_sent(f"monthly_{month_key}")
 
     logger.info(
         f"Catch-up check | Lisbon time: {t.strftime('%H:%M')} | "
-        f"windows: morning={in_morning_window}, evening={in_evening_window}, weekly={in_weekly_window} | "
-        f"hours since last: morning={hours_morning:.1f}h, evening={hours_evening:.1f}h, weekly={hours_weekly:.1f}h"
+        f"windows: morning={in_morning_window}, evening={in_evening_window}, weekly={in_weekly_window}, monthly={in_monthly_window} | "
+        f"hours since last: morning={hours_morning:.1f}h, evening={hours_evening:.1f}h, weekly={hours_weekly:.1f}h, monthly={hours_monthly:.1f}h"
     )
 
     if in_morning_window and hours_morning >= 23:
@@ -254,6 +349,10 @@ async def catchup_missed(bot):
     if in_weekly_window and hours_weekly >= 23:
         logger.info("Catch-up: sending missed weekly report")
         await _do_send_weekly(bot, late=True)
+
+    if in_monthly_window and hours_monthly >= 23:
+        logger.info("Catch-up: sending missed monthly report")
+        await _do_send_monthly(bot, late=True, month_key=month_key)
 
 
 # ── Setup ──────────────────────────────────────────────────────────────────
@@ -278,9 +377,15 @@ def setup_jobs(app: Application):
         days=(6,),  # 6 = Sunday
         name="weekly_report",
     )
+    jq.run_daily(
+        _send_monthly_report,
+        time=datetime.time(hour=MONTHLY_HOUR, minute=MONTHLY_MINUTE, tzinfo=TIMEZONE),
+        name="monthly_report",
+    )
     logger.info(
         f"Reminders set: morning {MORNING_HOUR}:{MORNING_MINUTE:02d}, "
         f"evening {EVENING_HOUR}:{EVENING_MINUTE:02d}, "
-        f"weekly Sun {WEEKLY_HOUR}:{WEEKLY_MINUTE:02d} Lisbon. "
+        f"weekly Sun {WEEKLY_HOUR}:{WEEKLY_MINUTE:02d}, "
+        f"monthly last day {MONTHLY_HOUR}:{MONTHLY_MINUTE:02d} Lisbon. "
         f"Chats: {_chat_ids}"
     )

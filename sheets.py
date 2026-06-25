@@ -1,16 +1,20 @@
 import logging
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 
-from config import GOOGLE_SERVICE_ACCOUNT_JSON, SHEET_COLUMNS, SPREADSHEET_ID
+from config import GOOGLE_SERVICE_ACCOUNT_JSON, SHEET_COLUMNS, SPREADSHEET_ID, TIMEZONE
 
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+
+def _today():
+    return datetime.now(tz=TIMEZONE).date()
 
 
 def _client():
@@ -63,7 +67,7 @@ def get_all_records() -> list[dict]:
 
 
 def get_today_data() -> dict:
-    today = str(date.today())
+    today = str(_today())
     for row in get_all_records():
         if str(row.get("date", "")) == today:
             return row
@@ -71,7 +75,7 @@ def get_today_data() -> dict:
 
 
 def get_week_data() -> list[dict]:
-    start = date.today() - timedelta(days=6)
+    start = _today() - timedelta(days=6)
     result = []
     for row in get_all_records():
         try:
@@ -83,12 +87,34 @@ def get_week_data() -> list[dict]:
     return result
 
 
+def get_month_data(year: int | None = None, month: int | None = None) -> list[dict]:
+    today = _today()
+    if year is None or month is None:
+        year = today.year
+        month = today.month
+    start = date(year, month, 1)
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    end = min(today, next_month - timedelta(days=1))
+    result = []
+    for row in get_all_records():
+        try:
+            row_date = date.fromisoformat(str(row.get("date", "")))
+        except ValueError:
+            continue
+        if start <= row_date <= end:
+            result.append(row)
+    return result
+
+
 def save_data(data: dict) -> bool:
     try:
         ws = _sheet()
         _ensure_header(ws)
 
-        row_date = str(data.get("date") or date.today())
+        row_date = str(data.get("date") or _today())
         records = ws.get_all_records()
         target_row = None
         existing = {}
