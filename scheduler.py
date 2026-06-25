@@ -8,7 +8,6 @@ the last 23 hours, it is sent immediately regardless of restart time.
 import json
 import logging
 import datetime
-from collections import Counter
 from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
@@ -22,25 +21,6 @@ _chat_ids: set[int] = set()
 
 WEEKLY_HOUR   = 21
 WEEKLY_MINUTE = 0
-
-NUMERIC_EVENING = [
-    ("baseline_day",           "📊 Базовый день"),
-    ("evening_energy",         "⚡ Энергия"),
-    ("irritability",           "😤 Раздражительность"),
-    ("social_battery",         "🔋 Соц. заряд"),
-    ("confidence_beauty",      "✨ Уверенность"),
-    ("physical_state_evening", "💪 Физ. состояние"),
-    ("productivity_focus",     "🎯 Продуктивность"),
-    ("leo_day",                "🦁 День с Лео"),
-    ("intimacy_desire",        "❤️ Нежность / контакт"),
-]
-NUMERIC_MORNING = [
-    ("morning_energy", "🌅 Энергия утром"),
-    ("morning_mood",   "😊 Настроение утром"),
-    ("sleep_quality",  "😴 Сон"),
-    ("anxiety_level",  "😟 Тревога"),
-]
-
 
 # ── Timestamp-based sent tracking ─────────────────────────────────────────
 
@@ -130,77 +110,8 @@ def _start_button(flow: str) -> InlineKeyboardMarkup:
     ]])
 
 
-def _bar(value: float, max_val: float = 10) -> str:
-    filled = round((value / max_val) * 10)
-    return "█" * filled + "░" * (10 - filled)
-
-
 def _now_lisbon() -> datetime.datetime:
     return datetime.datetime.now(tz=TIMEZONE)
-
-
-# ── Weekly report builder ──────────────────────────────────────────────────
-
-def _build_weekly_report(records: list, insight: str = "") -> str:
-    if not records:
-        return "За эту неделю нет данных."
-
-    def avg(field):
-        vals = []
-        for r in records:
-            v = r.get(field)
-            if v not in ("", None):
-                try:
-                    vals.append(float(v))
-                except (ValueError, TypeError):
-                    pass
-        return sum(vals) / len(vals) if vals else None
-
-    lines = []
-    if insight:
-        lines.append(insight)
-        lines.append("")
-
-    lines.extend([
-        f"📋 *Итоги недели* — {len(records)} дн. с данными\n",
-        "─── Вечерние метрики ───",
-    ])
-    for field, label in NUMERIC_EVENING:
-        a = avg(field)
-        if a is not None:
-            lines.append(f"{label}\n`{_bar(a)}` {a:.1f}")
-
-    morning_avgs = [(label, avg(field)) for field, label in NUMERIC_MORNING if avg(field) is not None]
-    if morning_avgs:
-        lines.append("\n─── Утренние метрики ───")
-        for label, a in morning_avgs:
-            lines.append(f"{label}\n`{_bar(a)}` {a:.1f}")
-
-    scored = [r for r in records if r.get("baseline_day") not in ("", None)]
-    if scored:
-        try:
-            best  = max(scored, key=lambda r: float(r["baseline_day"]))
-            worst = min(scored, key=lambda r: float(r["baseline_day"]))
-            lines.append(f"\n🏆 Лучший день: {best['date']} — baseline *{best['baseline_day']}*")
-            if worst["date"] != best["date"]:
-                lines.append(f"💔 Сложный день: {worst['date']} — baseline *{worst['baseline_day']}*")
-            bm = best.get("best_moment", "")
-            if bm:
-                lines.append(f"\n✨ Момент недели:\n_{bm}_")
-        except (ValueError, TypeError):
-            pass
-
-    all_tags = []
-    for r in records:
-        t = r.get("tags", "")
-        if t:
-            all_tags.extend([x.strip() for x in str(t).split(",") if x.strip()])
-    if all_tags:
-        top = Counter(all_tags).most_common(5)
-        lines.append("\n🏷 Частые теги: " + ", ".join(f"{t} ({c})" for t, c in top))
-
-    lines.append("\nХорошей новой недели! 💜")
-    return "\n".join(lines)
 
 
 # ── Senders ────────────────────────────────────────────────────────────────
@@ -262,18 +173,17 @@ async def _do_send_weekly(bot, late: bool = False):
         cycle_block = cycle.format_cycle_block(info)
     except Exception:
         pass
-    insight = weekly_insights.build_weekly_insight(records, cycle_block)
-    text = _build_weekly_report(records, insight)
+    text = weekly_insights.build_weekly_insight(records, cycle_block, all_records)
     if cycle_block:
         text += f"\n\n{cycle_block}"
     if late:
-        text = "⏰ _Опоздавший отчёт_ — бот перезапускался\n\n" + text
+        text = "⏰ Опоздавший отчёт — бот перезапускался\n\n" + text
 
     now = _now_lisbon()
     iso_week = f"{now.isocalendar()[0]}-W{now.isocalendar()[1]}"
     for chat_id in list(_chat_ids):
         try:
-            await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+            await bot.send_message(chat_id=chat_id, text=text)
             logger.info(f"Sent weekly report to {chat_id} (late={late})")
         except Exception as e:
             logger.error(f"Error sending weekly report to {chat_id}: {e}")

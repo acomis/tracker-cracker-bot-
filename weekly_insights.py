@@ -1,7 +1,7 @@
 import json
 import logging
-from statistics import mean
 from collections import Counter
+from statistics import mean
 
 from openai import OpenAI
 
@@ -19,8 +19,8 @@ NUMERIC_FIELDS = {
     "baseline_day": "день в целом",
     "evening_energy": "энергия вечером",
     "irritability": "раздражительность",
-    "social_battery": "социальный заряд",
-    "confidence_beauty": "уверенность / красота",
+    "social_battery": "социальная батарейка",
+    "confidence_beauty": "уверенность",
     "physical_state_evening": "физическое состояние вечером",
     "productivity_focus": "продуктивность / фокус",
     "leo_day": "день с Лео",
@@ -28,6 +28,18 @@ NUMERIC_FIELDS = {
 }
 
 TEXT_FIELDS = ("morning_notes", "best_moment", "worst_moment", "evening_notes")
+
+PATTERN_CANDIDATES = (
+    "сон ↔ энергия",
+    "сон ↔ настроение",
+    "спорт ↔ продуктивность",
+    "спорт ↔ физическое состояние",
+    "цикл ↔ уверенность",
+    "цикл ↔ энергия",
+    "качество дня Лео ↔ настроение",
+    "конфликты ↔ раздражительность",
+    "социальная нагрузка ↔ вечерняя энергия",
+)
 
 
 def _number(value):
@@ -37,38 +49,6 @@ def _number(value):
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _summarize_numeric(records: list[dict]) -> dict:
-    summary = {}
-    for field, label in NUMERIC_FIELDS.items():
-        values = [_number(row.get(field)) for row in records]
-        values = [value for value in values if value is not None]
-        if not values:
-            continue
-        summary[field] = {
-            "label": label,
-            "avg": round(mean(values), 1),
-            "min": min(values),
-            "max": max(values),
-            "spread": round(max(values) - min(values), 1),
-            "count": len(values),
-        }
-    return summary
-
-
-def _collect_tags(records: list[dict]) -> list[str]:
-    tags = []
-    for row in records:
-        raw = str(row.get("tags", ""))
-        tags.extend(tag.strip() for tag in raw.split(",") if tag.strip())
-    return tags
-
-
-def _top_metric_changes(summary: dict) -> list[dict]:
-    metrics = list(summary.values())
-    metrics.sort(key=lambda item: item["spread"], reverse=True)
-    return metrics[:5]
 
 
 def _compact_records(records: list[dict]) -> list[dict]:
@@ -92,67 +72,110 @@ def _compact_records(records: list[dict]) -> list[dict]:
     return compact
 
 
-def _local_fallback(records: list[dict], cycle_block: str = "") -> str:
-    numeric = _summarize_numeric(records)
-    baseline = numeric.get("baseline_day")
-    morning_energy = numeric.get("morning_energy")
-    evening_energy = numeric.get("evening_energy")
-    anxiety = numeric.get("anxiety_level")
-    focus = numeric.get("productivity_focus")
-    tags = Counter(_collect_tags(records)).most_common(3)
+def _summarize_numeric(records: list[dict]) -> dict:
+    summary = {}
+    for field, label in NUMERIC_FIELDS.items():
+        values = [_number(row.get(field)) for row in records]
+        values = [value for value in values if value is not None]
+        if values:
+            summary[field] = {
+                "label": label,
+                "avg": round(mean(values), 1),
+                "min": min(values),
+                "max": max(values),
+                "spread": round(max(values) - min(values), 1),
+                "count": len(values),
+            }
+    return summary
 
-    lines = ["✨ Смысл недели"]
-    lines.append(f"Ты отметила {len(records)} дн., и это уже дает не ощущение в тумане, а карту недели.")
+
+def _tags(records: list[dict]) -> list[str]:
+    result = []
+    for row in records:
+        result.extend(tag.strip() for tag in str(row.get("tags", "")).split(",") if tag.strip())
+    return result
+
+
+def _best_and_hardest(records: list[dict]) -> dict:
+    scored = []
+    for row in records:
+        score = _number(row.get("baseline_day"))
+        if score is not None:
+            scored.append((score, row))
+    if not scored:
+        return {}
+    return {
+        "best_day": _compact_records([max(scored, key=lambda item: item[0])[1]])[0],
+        "hardest_day": _compact_records([min(scored, key=lambda item: item[0])[1]])[0],
+    }
+
+
+def _history(records: list[dict], limit: int = 60) -> list[dict]:
+    ordered = sorted(records, key=lambda row: str(row.get("date", "")))
+    return _compact_records(ordered[-limit:])
+
+
+def _local_fallback(records: list[dict], history_records: list[dict], cycle_block: str = "") -> str:
+    summary = _summarize_numeric(records)
+    tags = Counter(_tags(records)).most_common(5)
+    baseline = summary.get("baseline_day")
+    sleep = summary.get("sleep_quality")
+    focus = summary.get("productivity_focus")
+
+    lines = ["🧭 Недельный разбор"]
+    if len(history_records) < 14:
+        lines.append("Пока недостаточно данных для сильных закономерностей: надежнее читать это как гипотезы на следующую неделю.")
     if baseline:
-        if baseline["spread"] >= 4:
-            lines.append(f"Неделя была с перепадами: общий день гулял от {baseline['min']:.0f} до {baseline['max']:.0f}.")
-        else:
-            lines.append(f"Общее состояние было довольно ровным: среднее {baseline['avg']}/10 без сильных провалов.")
-    if morning_energy and evening_energy:
-        lines.append(f"Утро выглядело тяжелее вечера: энергия утром {morning_energy['avg']}/10, вечером {evening_energy['avg']}/10.")
-    if anxiety:
-        lines.append(f"Тревога в среднем {anxiety['avg']}/10, но частые теги могут показать, где она цепляется за контекст.")
-    if focus:
-        lines.append(f"Фокус около {focus['avg']}/10: на следующей неделе лучше планировать короткие завершения, а не героические рывки.")
+        lines.append(f"Главная закономерность недели: общий день держался около {baseline['avg']}/10, разброс {baseline['spread']}.")
+    else:
+        lines.append("Главная закономерность недели: пока недостаточно данных для вывода.")
     if tags:
-        lines.append("Самые частые факторы: " + ", ".join(f"{tag} ({count})" for tag, count in tags) + ".")
+        lines.append("Главный контекст недели: " + ", ".join(f"{tag} ({count})" for tag, count in tags) + ".")
+    if sleep and focus:
+        lines.append(f"Для продуктивности стоит проверить сон: сон {sleep['avg']}/10, фокус {focus['avg']}/10.")
     if cycle_block:
-        lines.append("Цикл лучше использовать как контекст недели: сверять с ним энергию и раздражительность, но не превращать в приговор.")
-    lines.append("Твой труд здесь в том, что ты не просто прожила неделю, а оставила следы, по которым уже можно себя понимать точнее.")
+        lines.append("Цикл стоит учитывать как контекст планирования, особенно для спорта, съемок и глубокой работы.")
+    lines.append("Что попробовать: поставить глубокую работу на первую половину дня, оставить один легкий день без тяжелых встреч, заранее выбрать день для спорта и день для контента.")
     return "\n".join(lines)
 
 
-def build_weekly_insight(records: list[dict], cycle_block: str = "") -> str:
+def build_weekly_insight(
+    records: list[dict],
+    cycle_block: str = "",
+    history_records: list[dict] | None = None,
+) -> str:
     if not records:
         return ""
 
-    if not OPENAI_API_KEY:
-        return _local_fallback(records, cycle_block)
+    history_records = history_records or records
 
-    numeric_summary = _summarize_numeric(records)
+    if not OPENAI_API_KEY:
+        return _local_fallback(records, history_records, cycle_block)
+
     payload = {
-        "days_count": len(records),
-        "numeric_summary": numeric_summary,
-        "largest_spreads": _top_metric_changes(numeric_summary),
-        "top_tags": Counter(_collect_tags(records)).most_common(8),
-        "records": _compact_records(records),
+        "this_week": _compact_records(records),
+        "this_week_numeric_summary": _summarize_numeric(records),
+        "this_week_top_tags": Counter(_tags(records)).most_common(10),
+        "best_and_hardest": _best_and_hardest(records),
+        "history_days_count": len(history_records),
+        "recent_history": _history(history_records, limit=60),
         "cycle_context": cycle_block,
+        "pattern_candidates_to_check": PATTERN_CANDIDATES,
     }
 
     prompt = (
-        "Ты аналитик личного Telegram wellness-трекера. "
-        "Напиши на русском 5-8 живых предложений, не список. "
-        "Пользовательница — женщина; обращайся только в женском роде: отдохнула, сделала, заметила, была, смогла. "
-        "Никогда не используй мужской род в обращении к ней. "
-        "Твоя задача: сделать выводы из цифр, а не говорить общие поддерживающие фразы. "
-        "Обязательно используй 2-4 конкретных наблюдения из данных: средние значения, контрасты, перепады, частые теги, лучшие/сложные дни, заметки. "
-        "Скажи, была ли неделя ровной или с перепадами, и почему. "
-        "Скажи, где пользовательница уже проделала работу: регулярность, выдерживание сложных дней, замечание паттернов, сохранение контакта с собой. "
-        "Дай 2 практичных ожидания или фокуса на следующую неделю, связанных с данными и циклом, если он есть. "
-        "Тон: умный, теплый, точный, немного разговорный; без канцелярита и без открыток. "
-        "Запрещено: 'значительные усилия', 'твой опыт ценен', 'помни', 'моральный дух', 'всё, что ты делаешь, имеет значение'. "
-        "Не ставь диагнозы, не обещай медицинских эффектов, не выдумывай факты вне данных. "
-        "Пиши от второго лица, максимум 8 предложений, без markdown-заголовков. "
+        "Ты персональная AI-система поддержки принятия решений, а не mood tracker. "
+        "Пользовательница — женщина; обращайся только в женском роде. "
+        "Цель weekly report — не вывести средние значения, а найти реальные закономерности и предложить решения на следующую неделю. "
+        "Используй прежде всего собственную историю пользовательницы. "
+        "Если данных мало для закономерности, прямо пиши: 'Пока недостаточно данных для вывода'. "
+        "Никогда не придумывай связи. Если видишь только гипотезу, называй ее гипотезой. "
+        "Сформируй отчет с разделами строго в таком порядке: "
+        "Главная закономерность недели; Главный источник энергии; Главная причина усталости; "
+        "Самые продуктивные условия; Лучший день недели; Самый тяжелый день; Что попробовать на следующей неделе. "
+        "В лучшем и тяжелом дне объясни возможные причины по данным, а не просто назови дату. "
+        "В последнем разделе дай 3-5 конкретных рекомендаций на следующую неделю: когда глубокая работа, блог/контент, спорт, отдых, встречи/коммуникации. "
+        "Пиши коротко, практично, без таблиц, без пересказа очевидных цифр, без медицинских диагнозов. "
         "Данные:\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
@@ -165,21 +188,18 @@ def build_weekly_insight(records: list[dict], cycle_block: str = "") -> str:
                 {
                     "role": "system",
                     "content": (
-                        "Ты пишешь короткие поддерживающие выводы по self-tracking данным для женщины. "
-                        "Всегда обращайся к пользовательнице в женском роде. "
-                        "Не выдумывай факты вне данных."
+                        "Ты decision-support AI для женщины. "
+                        "Ищи проверяемые паттерны в ее собственной истории и превращай их в решения на следующую неделю. "
+                        "Не выдумывай закономерности."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.7,
-            max_tokens=550,
+            temperature=0.45,
+            max_tokens=1100,
         )
         text = response.choices[0].message.content or ""
-        text = text.strip()
-        if text:
-            return f"✨ Смысл недели\n{text}"
+        return text.strip()
     except Exception as e:
         logger.error("Failed to generate weekly AI insight: %s", e)
-
-    return _local_fallback(records, cycle_block)
+        return _local_fallback(records, history_records, cycle_block)

@@ -1,6 +1,5 @@
 """Command handlers: /start, /morning, /evening, /status, /skip, /week, /cancel, /yesterday"""
 
-import logging
 from datetime import date, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -10,34 +9,6 @@ import cycle
 import weekly_insights
 from config import MORNING_QUESTIONS, EVENING_QUESTIONS
 from handlers.checkin import start_flow, cancel_flow, handle_skip as checkin_skip, STATE
-
-logger = logging.getLogger(__name__)
-
-NUMERIC_EVENING = [
-    ("baseline_day",           "📊 Базовый день"),
-    ("evening_energy",         "⚡ Энергия"),
-    ("irritability",           "😤 Раздражительность"),
-    ("social_battery",         "🔋 Соц. заряд"),
-    ("confidence_beauty",      "✨ Уверенность"),
-    ("physical_state_evening", "💪 Физ. состояние"),
-    ("productivity_focus",     "🎯 Продуктивность"),
-    ("leo_day",                "🦁 День с Лео"),
-    ("intimacy_desire",        "❤️ Нежность / контакт"),
-]
-
-NUMERIC_MORNING = [
-    ("morning_energy",         "🌅 Энергия утром"),
-    ("morning_mood",           "😊 Настроение"),
-    ("sleep_quality",          "😴 Сон"),
-    ("anxiety_level",          "😟 Тревога"),
-]
-
-
-def _bar(value: float, max_val: float = 10) -> str:
-    """Mini bar chart using blocks, 10 chars wide."""
-    filled = round((value / max_val) * 10)
-    return "█" * filled + "░" * (10 - filled)
-
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -129,68 +100,14 @@ async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет данных за последние 7 дней.")
         return
 
-    # Compute averages for each numeric field
-    def avg(field):
-        vals = []
-        for r in records:
-            v = r.get(field, "")
-            try:
-                vals.append(float(v))
-            except (ValueError, TypeError):
-                pass
-        return sum(vals) / len(vals) if vals else None
-
     try:
         cycle_info = cycle.get_cycle_info(all_records)
         cycle_block = cycle.format_cycle_block(cycle_info)
     except Exception:
         cycle_block = ""
 
-    insight = weekly_insights.build_weekly_insight(records, cycle_block)
-
-    lines = []
-    if insight:
-        lines.append(insight)
-        lines.append("")
-
-    lines.append(f"📅 Последние 7 дней ({len(records)} дн. с данными)\n")
-
-    lines.append("── Вечерние метрики ──")
-    for field, label in NUMERIC_EVENING:
-        a = avg(field)
-        if a is not None:
-            lines.append(f"{label}\n  {_bar(a)}  {a:.1f}")
-
-    morning_avgs = [(l, avg(f)) for f, l in NUMERIC_MORNING if avg(f) is not None]
-    if morning_avgs:
-        lines.append("\n── Утренние метрики ──")
-        for label, a in morning_avgs:
-            lines.append(f"{label}\n  {_bar(a)}  {a:.1f}")
-
-    # Best day
-    best = max(records, key=lambda r: float(r.get("baseline_day") or 0), default=None)
-    worst = min(
-        [r for r in records if r.get("baseline_day")],
-        key=lambda r: float(r.get("baseline_day") or 10),
-        default=None,
-    )
-    if best:
-        lines.append(f"\n🏆 Лучший день: {best['date']} (baseline {best.get('baseline_day')})")
-    if worst:
-        lines.append(f"💔 Сложный день: {worst['date']} (baseline {worst.get('baseline_day')})")
-
-    # Tags summary
-    all_tags = []
-    for r in records:
-        t = r.get("tags", "")
-        if t:
-            all_tags.extend([x.strip() for x in t.split(",") if x.strip()])
-    if all_tags:
-        from collections import Counter
-        top = Counter(all_tags).most_common(5)
-        lines.append("\n🏷 Частые теги: " + ", ".join(f"{t}({c})" for t, c in top))
-
+    lines = [weekly_insights.build_weekly_insight(records, cycle_block, all_records)]
     if cycle_block:
         lines.append(f"\n{cycle_block}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await update.message.reply_text("\n".join(line for line in lines if line))

@@ -221,7 +221,12 @@ async def _finish_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
             today_data = sheets.get_today_data()
             if answers.get("date"):
                 today_data = {**today_data, **answers}
-            insight = daily_insights.build_evening_insight(today_data, week_records, cycle_block)
+            insight = daily_insights.build_tomorrow_decision_report(
+                today_data,
+                week_records,
+                all_records,
+                cycle_block,
+            )
             if insight:
                 text += f"\n\n{insight}"
             if cycle_block:
